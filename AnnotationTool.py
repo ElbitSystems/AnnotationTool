@@ -136,9 +136,6 @@ class AnnotationTool(QtWidgets.QMainWindow):
         # slider moved
         self.frameSlider.valueChanged.connect(self.frame_slider_update)
 
-        # 'User Guide' menu action
-        self.actionAbout.triggered.connect(self.user_guide_event)
-
         # 'About' menu action
         self.actionAbout.triggered.connect(self.about_event)
 
@@ -420,12 +417,14 @@ class AnnotationTool(QtWidgets.QMainWindow):
         # Qt quit
         QtWidgets.qApp.quit()
 
-    def user_guide_event(self):
-        pass
-
     @staticmethod
-    def about_event():
-        pass
+    def version():
+        return 1.1
+
+    def about_event(self):
+        QtWidgets.QMessageBox.information(QtWidgets.QMessageBox(), 'About',
+                                          "Video Annotation Tool version {0}".format(str(self.version())),
+                                          QtWidgets.QMessageBox.Ok)
 
     def export(self):
         # TODO: frames selection...

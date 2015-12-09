@@ -129,7 +129,6 @@
      <string>Help</string>
     </property>
     <addaction name="actionAbout"/>
-    <addaction name="actionUser_Guide"/>
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuEdit"/>

@@ -1,6 +1,4 @@
-import Annotation
 import Tracker
-import heapq
 import numpy as np
 import weakref
 
@@ -21,7 +19,7 @@ class AddCommand(QtWidgets.QUndoCommand):
         super(AddCommand, self).__init__()
 
         self.annotation_scene = annotation_scene
-        self.annotation = annotation_scene._annotation()
+        self.annotation = annotation_scene.annotation()
         self.frame_number = frame_number
         self.obj_id = obj_id
         self.class_name = class_name
@@ -59,7 +57,7 @@ class DeleteCommand(QtWidgets.QUndoCommand):
         super(DeleteCommand, self).__init__()
 
         self.annotation_scene = annotation_scene
-        self.annotation = annotation_scene._annotation()
+        self.annotation = annotation_scene.annotation()
         self.frame_number = frame_number
         self.obj_id = obj_id
         self.class_name = class_name
@@ -116,8 +114,7 @@ class DeleteCommand(QtWidgets.QUndoCommand):
 
             # add prediction in next frame at tracker generated location (non-final)
             self.annotation.add(self.frame_number + 1, self.obj_id, self.class_name,
-                                self.annotation_scene.tracker.track(
-                                self.points, self.frame_number, self.obj_id), False)
+                                self.annotation_scene.tracker.track(self.points, self.frame_number, self.obj_id), False)
 
 
 class ModifyCommand(QtWidgets.QUndoCommand):
@@ -128,7 +125,7 @@ class ModifyCommand(QtWidgets.QUndoCommand):
         super(ModifyCommand, self).__init__()
 
         self.annotation_scene = annotation_scene
-        self.annotation = annotation_scene._annotation()
+        self.annotation = annotation_scene.annotation()
         self.frame_number = frame_number
         self.obj_id = obj_id
         self.class_name = class_name
@@ -177,8 +174,7 @@ class ModifyCommand(QtWidgets.QUndoCommand):
 
             # add prediction in next frame at tracker generated location (non-final)
             self.annotation.add(self.frame_number + 1, self.obj_id, self.class_name,
-                                self.annotation_scene.tracker.track(
-                                self.points, self.frame_number, self.obj_id), False)
+                                self.annotation_scene.tracker.track(self.points, self.frame_number, self.obj_id), False)
 
     def undo(self):
         # remove from DB
@@ -220,7 +216,7 @@ class MoveCommand(QtWidgets.QUndoCommand):
         super(MoveCommand, self).__init__()
 
         self.annotation_scene = annotation_scene
-        self.annotation = annotation_scene._annotation()
+        self.annotation = annotation_scene.annotation()
         self.frame_number = frame_number
         self.obj_id = obj_id
         self.class_name = class_name
@@ -288,8 +284,7 @@ class MoveCommand(QtWidgets.QUndoCommand):
 
             # if there is an "old" prediction, restore it
             if self.old_pred_points:
-                self.annotation.add(self.frame_number + 1, self.obj_id, self.class_name,
-                                             self.old_pred_points, False)
+                self.annotation.add(self.frame_number + 1, self.obj_id, self.class_name, self.old_pred_points, False)
 
 
 class AnnotationObject(QtWidgets.QGraphicsPolygonItem):
@@ -488,11 +483,7 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
         self.lines = []
 
         #   database
-        self._annotation = None
-
-        #   heap of "free" ID's
-        self.id_heap = list(range(1, 2 ** 16 - 1))
-        heapq.heapify(self.id_heap)
+        self.annotation = None
 
         #   current ID
         self.current_id = 0
@@ -517,12 +508,11 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
         self.changed_items = []
 
         #   DB information for current frame at load time
-        self.records = None
+        self.records = []
 
     def set_background(self, image):
         # add image; TODO: find a way to use self.backgroundBrush
         self.background = self.addPixmap(QtGui.QPixmap.fromImage(image))
-
 
     def set_colormap(self):
         # seed pseudo-random number generator for repeatable colormap
@@ -536,10 +526,10 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
     def set_annotation(self, annotation):
 
         # weak reference to annotation
-        self._annotation = weakref.ref(annotation)
+        self.annotation = weakref.ref(annotation)
 
         # assign tracker to this database
-        self.tracker = Tracker.Tracker(self._annotation())
+        self.tracker = Tracker.Tracker(self.annotation())
 
     def get_color(self, rgb):
         # sanity check
@@ -570,7 +560,7 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
         # iterate over polygons and draw
         for r in self.records:
             # draw polygon
-            p = self.add_contour([int(s) for s in r[3].split()], r[1], r[2], r[4])
+            self.add_contour([int(s) for s in r[3].split()], r[1], r[2], r[4])
 
         # clear undo stack after frame change
         self.command_stack.clear()
@@ -675,7 +665,7 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
             (obj_id, class_name) = self.contour2obj[contour]
 
             #   change class in DB
-            self._annotation().change_class(obj_id, to_class)
+            self.annotation().change_class(obj_id, to_class)
 
             # update hashtable
             self.contour2obj[contour] = (obj_id, to_class)
@@ -715,13 +705,13 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
         self.lines = []
 
         # get new ID
-        self.current_id = self._annotation().get_max_id() + 1
+        self.current_id = self.annotation().get_max_id() + 1
 
         #   mark as a changed item (avoid tracking it again on frame change)
         self.changed_items.append(self.current_id)
 
         #   set color
-        color = self.get_color(self.colormap[:, self.current_id])
+        self.get_color(self.colormap[:, self.current_id])
 
     def mouseMoveEvent(self, event):
 
@@ -811,7 +801,7 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
 
     def finalize(self):
         """  mark objects that have been predicted for this frame as 'final' """
-        self._annotation().finalize_frame(self.frame_number)
+        self.annotation().finalize_frame(self.frame_number)
 
     def track(self):
         """ track all objects that haven't been 'touched' this frame
@@ -829,7 +819,7 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
             if r[1] not in self.changed_items:
 
                 # ensure object doesn't already exist in next frame (don't affect future if it already happened)
-                if len(self._annotation().get(self.frame_number + 1, r[1])) == 0:
+                if len(self.annotation().get(self.frame_number + 1, r[1])) == 0:
                     #   draw polygon
                     points = [int(s) for s in r[3].split()]
 
@@ -837,4 +827,4 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
                     prediction = self.tracker.track(points, self.frame_number, r[1])
 
                     #   add to _annotation. TODO: add as a batch (more efficient)
-                    self._annotation().add(self.frame_number + 1, r[1], r[2], prediction, False)
+                    self.annotation().add(self.frame_number + 1, r[1], r[2], prediction, False)

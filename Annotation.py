@@ -4,11 +4,16 @@ import shutil
 import logging
 import numpy as np
 import cv2
-
+import re
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 
 class VideoLoadError(Exception):
+    """ Exception class for video loading problems """
+    pass
+
+
+class VideoLoadVideoNotFound(Exception):
     """ Exception class for video loading problems """
     pass
 
@@ -27,7 +32,7 @@ class Annotation(object):
     def __init__(self, filename):
         """
         Creates a new annotation or loads an existing one from file
-        :param filename: video / annotation _filename
+        :param filename: video / annotation filename
         :return:
         """
 
@@ -35,12 +40,12 @@ class Annotation(object):
         self._filename = None
 
         # annotated video filename
-        self._video_filename = None
+        self.video_filename = None
 
         # initialize video capture
         self.cap = None
-        self._num_frames = 0
-        self._current_frame = 0
+        self.num_frames = 0
+        self.current_frame = 0
 
         # initialize database handlers
         self.cursor = self.connection = None
@@ -68,8 +73,18 @@ class Annotation(object):
             # create new annotation (using workspace temporary file)
             self.create(filename, temp_filename)
 
-    def current_frame(self):
-        return self._current_frame
+    @staticmethod
+    def update_video_filename_in_annotation(annotation, video):
+        # create database
+        connection = lite.connect(annotation)
+
+        # sqlite cursor
+        cursor = connection.cursor()
+
+        cursor.execute('UPDATE session SET video_file=(?)', (video,))
+        connection.commit()
+        connection.close()
+        return annotation
 
     def get_max_id(self):
 
@@ -105,11 +120,13 @@ class Annotation(object):
             logging.error('Annotation.create(): no such file ' + video_filename)
             raise VideoLoadError('Video Read Error: no such file ' + video_filename)
 
+        self._filename = annotation_filename
+
         # open video capture
         self.open_video(video_filename)
 
         # initialize to first frame
-        self._current_frame = 1
+        self.current_frame = 1
 
         # update _filename
         self._filename = annotation_filename
@@ -154,15 +171,15 @@ class Annotation(object):
             self.cursor.execute('SELECT * FROM session')
             params = self.cursor.fetchone()
 
-            # video _filename
+            # video filename
             video_filename = params[0]
             logging.info('Got video filename from .atc file')
 
-            # attempt to open
-            self.open_video(video_filename)
-
             # save filename
             self._filename = filename
+
+            # attempt to open
+            self.open_video(video_filename)
 
             # session parameters
             self.set_frame(params[1])
@@ -213,14 +230,14 @@ class Annotation(object):
         :return:
         """
 
-        if frame_number < 1 or frame_number > self.num_frames():
+        if frame_number < 1 or frame_number > self.num_frames:
             logging.warning('Illegal frame number {0} requested '.format(frame_number))
             return
 
-        self._current_frame = frame_number
+        self.current_frame = frame_number
 
         # save session
-        self.cursor.execute('UPDATE session SET current_frame=(?)', (self._current_frame,))
+        self.cursor.execute('UPDATE session SET current_frame=(?)', (self.current_frame,))
         self.connection.commit()
 
     def get_frame_image(self):
@@ -234,16 +251,16 @@ class Annotation(object):
 
         # read frame (annoying opencv version difference)
         if int(cv2.__version__[0]) < 3:
-            self.cap.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, self._current_frame-1)
+            self.cap.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, self.current_frame - 1)
         else:
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, self._current_frame-1)
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame - 1)
 
         # get from video capture
         ret, frame = self.cap.read()
 
         # check for failure
         if not ret:
-            error_message = 'error reading frame ' + str(self._current_frame)
+            error_message = 'error reading frame ' + str(self.current_frame)
             logging.error(error_message)
             raise VideoLoadError(error_message)
         return frame
@@ -254,6 +271,20 @@ class Annotation(object):
         :return: set video capture, video filename and number of frames
         """
         logging.info('Attempt to open video ' + str(video_filename))
+
+        # split filename
+        basename, extension = os.path.splitext(video_filename)
+
+        # handle image names
+        if extension in ['.jpg', '.bmp', '.tiff', '.tif', '.png']:
+
+            # find how many consecutive 0's in filename
+            *_, b = basename.split('/')
+            zeros = re.search('0+', b).group(0)
+            pat = '%' + str(len(zeros)) + 'd'
+
+            # python magic to replace last appearance of 'zeros' with 'pat'
+            video_filename = video_filename[::-1].replace(zeros[::-1], pat[::-1], 1)[::-1]
 
         # attempt to open
         self.cap = cv2.VideoCapture(video_filename)
@@ -267,16 +298,18 @@ class Annotation(object):
             self.cap = None
 
             # raise exception
-            raise VideoLoadError('failed to open video ' + video_filename + '. file might have been moved or corrupted')
+            e = VideoLoadVideoNotFound('failed to open video ' + video_filename + '. file might have been moved or corrupted')
+            e.filename = self._filename
+            raise e
 
         # get number of frames
         if int(cv2.__version__[0]) < 3:
-            self._num_frames = int(np.round(self.cap.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)))
+            self.num_frames = int(np.round(self.cap.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)))
         else:
-            self._num_frames = int(np.round(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)))
+            self.num_frames = int(np.round(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)))
 
         # update video filename
-        self._video_filename = video_filename
+        self.video_filename = video_filename
         logging.info('Opened video ' + str(video_filename) + ' successfully.')
 
     def add_class(self, class_name):
@@ -284,7 +317,16 @@ class Annotation(object):
         :param class_name: new class to be added
         :return:
         """
+
+        # check if duplicate
+        if class_name in self.classes():
+            return
+
+        # insert to table
         self.cursor.execute('INSERT INTO classes VALUES (?)', (class_name,))
+
+        # commit changes
+        self.connection.commit()
 
     def add(self, frame_number, object_id, class_name, contour, final):
         """
@@ -310,7 +352,7 @@ class Annotation(object):
         :param frame: frame to remove object from. if None will remove from all
         :return:
         """
-        if None == frame:
+        if frame is None:
             # note trailing comma to create a tuple
             self.cursor.execute('DELETE from frames where object=(?)', (object_id,))
         else:
@@ -319,18 +361,20 @@ class Annotation(object):
         # commit changes
         self.connection.commit()
 
-    def get(self, frame_number, obj_id=None):
+    def get(self, frame_number, obj_id=None, class_name=None):
         """
+        :param class_name: 
         :param frame_number: return objects (all or one) in this frame (integer)
         :param obj_id: ID's of object to return. if None return all (...)
         :return:
         """
-
         if obj_id is not None:
             self.cursor.execute('SELECT * FROM frames where frame=(?) and object=(?)', (frame_number, obj_id))
+        elif class_name is not None:
+            self.cursor.execute('SELECT * FROM frames where frame=(?) and class=(?) ORDER BY object', (frame_number, class_name))
         else:
             # note trailing comma to create a tuple
-            self.cursor.execute('SELECT * FROM frames WHERE frame=(?)', (frame_number,))
+            self.cursor.execute('SELECT * FROM frames WHERE frame=(?) ORDER BY object', (frame_number,))
 
         return self.cursor.fetchall()
 
@@ -417,7 +461,7 @@ class Annotation(object):
 
         self.cursor.execute('SELECT * FROM frames where object=(?)', (obj_id,))
         data = self.cursor.fetchall()
-        if data == []:
+        if not data:
             data_frames = []
         else:
             data_mat = np.array(data)
@@ -425,17 +469,21 @@ class Annotation(object):
 
         return data_frames
 
+    def get_annotations_of_id(self, obj_id):
+        """
+        This function returns entries relevant to obj_id from all frames
+        :param obj_id: integer
+        """
+
+        # Get all data from frames table relevant to obj_id
+        self.cursor.execute('SELECT * FROM frames where object=(?) ORDER BY frame', (obj_id,))
+        return self.cursor.fetchall()
+
     def filename(self):
         """
         :return: annotation _filename
         """
         return self._filename
-
-    def num_frames(self):
-        """
-        :return: number of frames in annotated video
-        """
-        return self._num_frames
 
     def classes(self):
         """
@@ -458,7 +506,7 @@ class Annotation(object):
         """
 
         # draw all requested frames
-        for i in progress(range(len(frames)), 'Export Progress', 'Help'):
+        for i in progress(range(len(frames)), 'Export Progress', 'Abort'):
             # current frame number
             f = frames[i]
 

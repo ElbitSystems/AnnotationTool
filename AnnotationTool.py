@@ -3,7 +3,6 @@ import sys
 import os
 import logging
 import pickle
-
 from PyQt5 import QtCore, QtGui, uic, QtWidgets
 
 # project imports
@@ -17,12 +16,7 @@ CURRENT_ANNOTATION_FILENAME = '.current.p'
 LOG_FILENAME = 'annotation.log'
 
 # annotation tool version
-VERSION = 0.2
-
-
-class ConfigError(Exception):
-    """ Exception class for errors in configuration """
-    pass
+VERSION = 1.3
 
 
 class FrameReadError(Exception):
@@ -56,7 +50,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
         self.enable_gui(False)
 
         # no annotation yet
-        self._annotation = None
+        self.annotation = None
 
         # set slider minimum
         self.frameSlider.setMinimum(1)
@@ -93,7 +87,9 @@ class AnnotationTool(QtWidgets.QMainWindow):
         self.actionSaveAs.setEnabled(value)
 
     def populate_class_combobox(self, classes_list):
-        """ populate comboBox with config.classes """
+        """ populate comboBox with config.classes
+        :param classes_list: list of classes
+        """
 
         # block signal to avoid recursive calls
         self.classSelectionComboBox.blockSignals(True)
@@ -130,11 +126,20 @@ class AnnotationTool(QtWidgets.QMainWindow):
         # combine objects
         self.actionCombine_Objects.triggered.connect(self.combine_objects)
 
+        # load classes
+        self.actionLoad_Classes.triggered.connect(self.load_classes)
+
+        # find
+        self.actionFind.triggered.connect(self.find_annotations)
+
         # disable slider tracking so as not to continuously read frames
         self.frameSlider.setTracking(False)
 
         # slider moved
         self.frameSlider.valueChanged.connect(self.frame_slider_update)
+
+        # 'User Guide' menu action
+        self.actionAbout.triggered.connect(self.user_guide_event)
 
         # 'About' menu action
         self.actionAbout.triggered.connect(self.about_event)
@@ -151,7 +156,10 @@ class AnnotationTool(QtWidgets.QMainWindow):
         # redo
         self.actionRedo.triggered.connect(self.scene.command_stack.redo)
 
-    def class_selection_changed(self, event):
+        find_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence('Ctrl+F'), self)
+        find_shortcut.activated.connect(self.find_annotations)
+
+    def class_selection_changed(self):
         """ slot for class selection combobox """
 
         # get text from ui
@@ -162,17 +170,20 @@ class AnnotationTool(QtWidgets.QMainWindow):
             # open window for new class name input ('str' to avoid QStrings)
             name, ok = QtWidgets.QInputDialog.getText(QtWidgets.QInputDialog(), 'New Class', 'Enter class name:')
 
-            if ok:
-                # convert QString to string
-                name = str(name)
+            # if user pressed 'cancel' or gave empty name
+            if not ok or not name:
+                return
+
+            # convert QString to string
+            name = str(name)
 
             # if such a class already exists do nothing
-            if name not in self._annotation.classes():
+            if name not in self.annotation.classes():
                 # add to configuration
-                self._annotation.add_class(name)
+                self.annotation.add_class(name)
 
                 # re-populate combo
-                self.populate_class_combobox(self._annotation.classes())
+                self.populate_class_combobox(self.annotation.classes())
 
                 # return value of combo to previous selection
                 self.classSelectionComboBox.setCurrentIndex(self.classSelectionComboBox.count() - 1)
@@ -187,11 +198,12 @@ class AnnotationTool(QtWidgets.QMainWindow):
 
     def open_file(self, file_type, filename=None):
 
-        title = 'Open Video' if file_type == 'video' else 'Open Annotation'
-        file_types = "Video Files (*.avi *.wmv *.mp4 *.mov)" if file_type == 'video' else 'Annotation File (*.atc)'
+        title = 'Open Video / Images' if file_type == 'video' else 'Open Annotation'
+        file_types = "Video Files (*.avi *.wmv *.mp4 *.mov);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)" \
+                     if file_type == 'video' else 'Annotation File (*.atc)'
 
         # if working on unsaved annotation
-        if self._annotation and not self._annotation.is_file_saved():
+        if self.annotation and not self.annotation.is_file_saved():
             message_box = QtWidgets.QMessageBox()
             message_box.setText("Annotation has not been saved")
             message_box.setInformativeText("Create new anyway?")
@@ -204,7 +216,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
                 return
 
             # user wants to discard his unsaved temp annotation
-            self._annotation.close()
+            self.annotation.close()
 
         # ask user if no filename given
         if not filename:
@@ -217,30 +229,50 @@ class AnnotationTool(QtWidgets.QMainWindow):
                 return
         try:
             # open annotation
-            self._annotation = Annotation.Annotation(filename)
+            self.annotation = Annotation.Annotation(filename)
 
             # Connect scene to annotation
-            self.scene.set_annotation(self._annotation)
+            self.scene.set_annotation(self.annotation)
 
             # update slider maximum
-            self.frameSlider.setMaximum(self._annotation.num_frames() - 1)
+            self.frameSlider.setMaximum(self.annotation.num_frames - 1)
 
             # enable GUI
             self.enable_gui(True)
 
             # load classes to GUI comboBox
-            self.populate_class_combobox(self._annotation.classes())
+            self.populate_class_combobox(self.annotation.classes())
 
             # save filename to last video used file (check first that it is not the temporary workspace)
-            if self._annotation.is_file_saved():
-                pickle.dump(self._annotation.filename(), open(CURRENT_ANNOTATION_FILENAME, "wb"))
+            if self.annotation.is_file_saved():
+                pickle.dump(self.annotation.filename(), open(CURRENT_ANNOTATION_FILENAME, "wb"))
 
             # set window title
             self.setWindowTitle('Video Annotation Tool' +
-                                ('*' if file_type == 'video' else self._annotation.filename()))
+                                ('*' if file_type == 'video' else self.annotation.filename()))
 
             # update
             self.update()
+
+        except Annotation.VideoLoadVideoNotFound as e:
+            message_box = QtWidgets.QMessageBox()
+            message_box.setText(str(e))
+            message_box.setInformativeText("Would you like to navigate to the new location of the video file?")
+            message_box.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            message_box.setDefaultButton(QtWidgets.QMessageBox.Yes)
+            ret = message_box.exec_()
+            if ret == QtWidgets.QMessageBox.Yes:
+                filename = self.provide_video_location()
+                annotation_file = Annotation.Annotation.update_video_filename_in_annotation(e.filename, filename)
+
+                if self.annotation:
+                    self.annotation.close()
+                    del self.annotation
+                self.annotation = None
+
+                self.open_file('annotation', annotation_file)
+                # self.annotation = Annotation.Annotation(annotation_file)
+                # self.update()
 
         # file reading failed
         except (Annotation.AnnotationFileError, Annotation.VideoLoadError) as e:
@@ -248,7 +280,18 @@ class AnnotationTool(QtWidgets.QMainWindow):
             message_box.setText(str(e))
             message_box.setStandardButtons(QtWidgets.QMessageBox.Ok)
             message_box.setDefaultButton(QtWidgets.QMessageBox.Ok)
-            ret = message_box.exec_()
+            message_box.exec_()
+
+    def provide_video_location(self):
+        title = 'Open Video / Images'
+        file_types = "Video Files (*.avi *.wmv *.mp4 *.mov);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)"
+
+        # open file (the 'str' - some versions of pyqt return a QString instead of a normal string)
+        filename = str(QtWidgets.QFileDialog.getOpenFileName(QtWidgets.QFileDialog(),
+                                                             title, QtCore.QDir.currentPath(), file_types)[0])
+
+        # if user presses 'cancel' in dialog, null string is returned
+        return filename
 
     def save_annotation(self):
         """ Save current annotation """
@@ -265,21 +308,21 @@ class AnnotationTool(QtWidgets.QMainWindow):
                 filename += Annotation.Annotation.SUFFIX
 
             # save annotation
-            self._annotation.save(filename)
+            self.annotation.save(filename)
 
             # update window title
-            self.setWindowTitle('Video Annotation Tool - ' + self._annotation.filename())
+            self.setWindowTitle('Video Annotation Tool - ' + self.annotation.filename())
 
             # save filename as last video used
-            if self._annotation.is_file_saved():
-                pickle.dump(self._annotation.filename(), open(CURRENT_ANNOTATION_FILENAME, "wb"))
+            if self.annotation.is_file_saved():
+                pickle.dump(self.annotation.filename(), open(CURRENT_ANNOTATION_FILENAME, "wb"))
 
         except ValueError:
             pass
 
     def frame_slider_update(self):
         """ update after slider release """
-        self._annotation.set_frame(self.frameSlider.value())
+        self.annotation.set_frame(self.frameSlider.value())
 
         # update
         self.update()
@@ -296,7 +339,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
                 raise ValueError
 
             # set
-            self._annotation.set_frame(frame_number)
+            self.annotation.set_frame(frame_number)
 
             # update
             self.update()
@@ -324,17 +367,17 @@ class AnnotationTool(QtWidgets.QMainWindow):
     def keyPressEvent(self, event):
 
         # do nothing if not active yet
-        if not self._annotation:
+        if not self.annotation:
             return
 
         # move back one frame
-        if event.key() == QtCore.Qt.Key_Left and self._annotation.current_frame() > 1:
-            self._annotation.set_frame(self._annotation.current_frame() - 1)
+        if event.key() == QtCore.Qt.Key_Left and self.annotation.current_frame > 1:
+            self.annotation.set_frame(self.annotation.current_frame - 1)
             self.update()
 
         # move forward one frame
-        elif event.key() == QtCore.Qt.Key_Right and self._annotation.current_frame() < self._annotation.num_frames():
-            self._annotation.set_frame(self._annotation.current_frame() + 1)
+        elif event.key() == QtCore.Qt.Key_Right and self.annotation.current_frame < self.annotation.num_frames:
+            self.annotation.set_frame(self.annotation.current_frame + 1)
             self.update()
 
         # delete object from scene
@@ -353,28 +396,24 @@ class AnnotationTool(QtWidgets.QMainWindow):
         """ main GUI function - update after change """
 
         # do nothing if there is no annotation
-        if self._annotation is None: return
+        if self.annotation is None:
+            return
 
         # block signals to avoid recursive calls
         self.frameSlider.blockSignals(True)
         self.frameEdit.blockSignals(True)
 
         # set current frame number in slider
-        self.frameSlider.setValue(self._annotation.current_frame())
+        self.frameSlider.setValue(self.annotation.current_frame)
 
         # set text in edit box according to slider
-        self.frameEdit.setText(str(self._annotation.current_frame()))
+        self.frameEdit.setText(str(self.annotation.current_frame))
 
         # release signals
         self.frameSlider.blockSignals(False)
         self.frameEdit.blockSignals(False)
 
-        frame = self._annotation.get_frame_image()
-
-        # track objects if moving one frame ahead
-        # if self.draw['previous_frame'] is not None
-        # and self.draw['current_frame'] == self.draw['previous_frame'] + 1:
-        #     self.scene.track()
+        frame = self.annotation.get_frame_image()
 
         # deal with opencv's BGR abomination; create Qt image (width, height)
         image = QtGui.QImage(frame.tostring(), frame.shape[1], frame.shape[0],
@@ -387,7 +426,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
         self.scene.set_background(image)
 
         # load objects for current frame
-        self.scene.load(self._annotation.current_frame(), self._annotation.get(self._annotation.current_frame()))
+        self.scene.load(self.annotation.current_frame, self.annotation.get(self.annotation.current_frame))
 
         #   display image on graphicsView (canvas)
         self.graphicsView.setScene(self.scene)
@@ -399,7 +438,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
         """ overloaded closeEvent to allow quitting by closing window.
             save current draw and quit """
 
-        if self._annotation and not self._annotation.is_file_saved():
+        if self.annotation and not self.annotation.is_file_saved():
             message_box = QtWidgets.QMessageBox()
             message_box.setText("Annotation has not been saved")
             message_box.setInformativeText("Exit anyway?")
@@ -412,23 +451,24 @@ class AnnotationTool(QtWidgets.QMainWindow):
                 return
 
             # save session details
-            self._annotation.exit()
+            self.annotation.exit()
 
         # Qt quit
         QtWidgets.qApp.quit()
 
-    @staticmethod
-    def version():
-        return 1.1
+    def user_guide_event(self):
+        pass
 
-    def about_event(self):
-        QtWidgets.QMessageBox.information(QtWidgets.QMessageBox(), 'About',
-                                          "Video Annotation Tool version {0}".format(str(self.version())),
-                                          QtWidgets.QMessageBox.Ok)
+    @staticmethod
+    def about_event():
+        msg_box = QtWidgets.QMessageBox()
+        msg_box.setWindowTitle('About Annotation Tool')
+        msg_box.setText('Video ground truth annotation tool for manual object marking.\nVersion ' + str(VERSION))
+        msg_box.exec_()
 
     def export(self):
         # TODO: frames selection...
-        frames = list(range(1, self._annotation.num_frames()))
+        frames = list(range(1, self.annotation.num_frames))
 
         filename = str(QtWidgets.QFileDialog.getSaveFileName(QtWidgets.QFileDialog(), "Save as...",
                                                              QtCore.QDir.currentPath(),
@@ -436,24 +476,24 @@ class AnnotationTool(QtWidgets.QMainWindow):
         if not filename:
             return
 
-        self._annotation.export((self.scene.width(), self.scene.height()), os.path.dirname(filename),
-                                os.path.splitext(os.path.basename(str(filename)))[0], frames,
-                                self.scene.colormap, self.scene.inverse_colormap,
-                                os.path.splitext(os.path.basename(str(filename)))[1])
+        self.annotation.export((self.scene.width(), self.scene.height()), os.path.dirname(filename),
+                               os.path.splitext(os.path.basename(str(filename)))[0], frames,
+                               self.scene.colormap, self.scene.inverse_colormap,
+                               os.path.splitext(os.path.basename(str(filename)))[1])
 
     def combine_objects(self):
 
         # generate dialog that gets the objects ID's to combine
-        dialogTextBrowser = CombineObjectsDialog(self)
-        dialogTextBrowser.exec_()
+        dialog_text_browser = CombineObjectsDialog(self)
+        dialog_text_browser.exec_()
 
-        if dialogTextBrowser.yes:
+        if dialog_text_browser.yes:
             # check if 'from_id' exists in current frame
-            record = self._annotation.get(self.scene.frame_number, dialogTextBrowser.from_id)
+            record = self.annotation.get(self.scene.frame_number, dialog_text_browser.from_id)
 
             try:
                 # combine objects in DB file
-                self._annotation.combine_objects(dialogTextBrowser.from_id, dialogTextBrowser.target_id)
+                self.annotation.combine_objects(dialog_text_browser.from_id, dialog_text_browser.target_id)
             except ValueError as e:
                 QtWidgets.QMessageBox.information(QtWidgets.QMessageBox(), 'Error Message',
                                                   str(e), QtWidgets.QMessageBox.Ok)
@@ -466,13 +506,240 @@ class AnnotationTool(QtWidgets.QMainWindow):
                     record = record[0]
 
                     # the 'To ID' color in scene
-                    color = self.scene.get_color(self.scene.colormap[:, dialogTextBrowser.target_id])
+                    color = self.scene.get_color(self.scene.colormap[:, dialog_text_browser.target_id])
 
                     # remove old contour
                     self.scene.remove_contour(record[1])
 
                     # add new contour
                     self.scene.add_contour([int(s) for s in record[3].split()], record[1], record[2], record[4], color)
+
+    def load_classes(self):
+        """
+        Read whitespace separated list of classes from text file
+        A class name can not contain whitespaces.
+        :return:
+        """
+        # open file (the 'str' - some versions of pyqt return a QString instead of a normal string)
+        filename = str(QtWidgets.QFileDialog.getOpenFileName(QtWidgets.QFileDialog(),
+                                                             'Please select valid text file', QtCore.QDir.currentPath(),
+                                                             'Text Files *.txt')[0])
+
+        # if user presses 'cancel' in dialog, null string is returned
+        if not filename:
+            return
+
+        # try parsing the file:
+        try:
+            # read file
+            with open(filename) as f:
+                class_list = f.read().split()
+
+            # add classes
+            for class_name in class_list:
+                self.annotation.add_class(str(class_name).strip())
+
+            # re populate class combo box
+            self.populate_class_combobox(self.annotation.classes())
+        except RuntimeError:
+            msg_box = QtWidgets.QMessageBox()
+            msg_box.setText('Failed to load class.')
+            msg_box.exec_()
+
+    def zoom_on(self, obj, frame=None):
+        # move to frame if needed
+        if frame:
+            self.annotation.set_frame(frame)
+
+            # update
+            self.update()
+
+        # get the annotation item of the object
+        annotation_item = self.scene.obj2contour[obj]
+
+        # fit him to view
+        self.graphicsView.fitInView(annotation_item.boundingRect(), QtCore.Qt.KeepAspectRatio)
+
+        # zoom out very little
+        self.graphicsView.scale(0.5, 0.5)
+
+    def find_annotations(self):
+
+        #   create Find window
+        find = FindDialog(self)
+        find.show()
+
+
+class FindDialog(QtWidgets.QDialog):
+
+    FIND_ALL = 'Find All in Frame'
+
+    def __init__(self, parent=None):
+        super(FindDialog, self).__init__(parent)
+        self.parent = parent
+
+        # iterator placeholder
+        self.annotation_iter = None
+
+        # init UI
+        # Search mode - radio button - By Class / By ID
+        self.search_mode_radio_class = QtWidgets.QRadioButton("By Class", self)
+        self.search_mode_radio_id = QtWidgets.QRadioButton("By ID", self)
+
+        # Button to search the document for something
+        self.search_name = QtWidgets.QComboBox()
+        self.search_name.focusInEvent = lambda e: self.search_mode_radio_class.setChecked(True)
+
+        self.search_id = QtWidgets.QLineEdit()
+        self.search_id.focusInEvent = lambda e: self.search_mode_radio_id.setChecked(True)
+
+        # Add existing class names to search options.
+        class_names = self.parent.annotation.classes()
+        self.search_name.addItems([FindDialog.FIND_ALL] + class_names)
+
+        self.find_button = QtWidgets.QPushButton("Find", self)
+        self.find_button.clicked.connect(self.find_stuff)
+
+        self.next_button = QtWidgets.QPushButton("Next", self)
+        self.next_button.setEnabled(False)
+        self.next_button.clicked.connect(self.next_annotation)
+
+        self.back_button = QtWidgets.QPushButton('Back', self)
+        self.back_button.setEnabled(False)
+        self.back_button.clicked.connect(self.prev_annotation)
+
+        self.status = QtWidgets.QStatusBar()
+        self.status.showMessage('Press Find to find annotations.')
+
+        layout = QtWidgets.QGridLayout()
+        layout.addWidget(self.search_mode_radio_class, 0, 0)
+        layout.addWidget(self.search_mode_radio_id, 1, 0)
+        layout.addWidget(self.search_name, 0, 1, 1, 2)
+        layout.addWidget(self.search_id, 1, 1, 1, 2)
+        layout.addWidget(self.find_button, 2, 0)
+        layout.addWidget(self.back_button, 2, 1)
+        layout.addWidget(self.next_button, 2, 2)
+        layout.addWidget(self.status, 3, 0, 1, 3)
+
+        self.setGeometry(450, 450, 150, 150)
+        self.setWindowTitle('Find annotation')
+        self.setLayout(layout)
+
+        # By default the class mode is activated
+        self.search_mode_radio_class.setChecked(True)
+        # Done init ui
+
+    def next_annotation(self):
+        try:
+            next_item, index = self.annotation_iter.next()
+            item_class = next_item[2]
+            item_id = next_item[1]
+            frame = next_item[0]
+            self.parent.zoom_on(item_id, frame)
+        except StopIteration:
+            # display message to user
+            msg_box = QtWidgets.QMessageBox()
+            msg_box.setText('No annotation found.')
+            msg_box.exec_()
+
+            # disable the 'Next' button
+            self.next_button.setEnabled(False)
+            self.back_button.setEnabled(False)
+        else:
+            self.update_status_bar(index, item_id, item_class)
+
+    def update_status_bar(self, index, s_id, s_class):
+        self.status.showMessage(
+            'Search result {current} out of {total}.\n {a_id} - {a_class}'.format(
+                    current=index,
+                    total=self.annotation_iter.len(),
+                    a_class=str(s_class),
+                    a_id=str(s_id)))
+        self.next_button.setEnabled(False if index == self.annotation_iter.len() else True)
+        self.back_button.setEnabled(False if index == 1 else True)
+
+    def prev_annotation(self):
+        try:
+            prev_item, index = self.annotation_iter.prev()
+            item_class = prev_item[2]
+            item_id = prev_item[1]
+            frame = prev_item[0]
+            self.parent.zoom_on(item_id, frame)
+        except StopIteration:
+            # display message to user
+            msg_box = QtWidgets.QMessageBox()
+            msg_box.setText('No annotation found.')
+            msg_box.exec_()
+
+            # disable the 'Back' button
+            self.back_button.setEnabled(False)
+        else:
+            self.update_status_bar(index, item_id, item_class)
+
+    def find_stuff(self):
+        # work mode is by Class
+        annotations = []
+        if self.search_mode_radio_class.isChecked():
+            # get text
+            selected = self.search_name.currentText()
+
+            # if user wants to search all annotation in frame - do not provide specific class to 'get' function
+            selected = None if selected == FindDialog.FIND_ALL else selected
+
+            # relevant annotations
+            annotations = self.parent.annotation.get(self.parent.annotation.current_frame, class_name=selected)
+        elif self.search_mode_radio_id.isChecked():
+            # Get input text
+            search_id = self.search_id.text()
+
+            # Error handling
+            try:
+                number = int(search_id)
+            except ValueError:
+                msg_box = QtWidgets.QMessageBox()
+                msg_box.setWindowTitle('Error')
+                msg_box.setText('ID can only be a number')
+                msg_box.exec_()
+                return
+
+            # get relevant annotations
+            annotations = self.parent.annotation.get_annotations_of_id(number)
+
+        # create iterator for annotations in search result
+        self.annotation_iter = TwoWayIterator(annotations)
+
+        # enable the 'Next' button
+        self.next_button.setEnabled(True)
+        self.back_button.setEnabled(True)
+
+        # find the first annotation
+        self.next_annotation()
+
+
+class TwoWayIterator(object):
+
+    def __init__(self, data):
+        self.data = data
+        self.index = 0
+
+    def next(self):
+        try:
+            next = self.data[self.index]
+            self.index += 1
+        except IndexError:
+            raise StopIteration
+        else:
+            return next, self.index
+
+    def prev(self):
+        if self.index == 0 or self.index == 1:
+            raise StopIteration
+        self.index -= 1
+        prev = self.data[self.index - 1]
+        return prev, self.index
+
+    def len(self):
+        return len(self.data)
 
 
 class CombineObjectsDialog(QtWidgets.QDialog):
@@ -545,7 +812,7 @@ class CombineObjectsDialog(QtWidgets.QDialog):
 
 if __name__ == "__main__":
     # initialize logger
-    logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG, filemode='w')
+    logging.basicConfig(filename=LOG_FILENAME, level=logging.INFO, filemode='w')
     logging.info('start application.')
 
     try:
@@ -556,7 +823,7 @@ if __name__ == "__main__":
         annotation_tool.show()
         sys.exit(app.exec_())
 
-    except (ConfigError, Annotation.VideoLoadError, FrameReadError) as err:
+    except (Annotation.VideoLoadError, FrameReadError) as err:
         # message box
         msgBox = QtWidgets.QMessageBox()
         msgBox.setText(repr(err))

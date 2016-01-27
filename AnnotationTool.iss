@@ -7,8 +7,8 @@
 ; (To generate a new GUID, click Tools | Generate GUID inside the IDE.)
 AppId={{44E1FA83-8C5C-410D-8B98-0BF171F4AA51}
 AppName=AnnotationTool
-AppVersion=1.2
-;AppVerName=AnnotationTool 1.2
+AppVersion=1.3
+;AppVerName=AnnotationTool 1.3
 AppPublisher=Elbit Systems, Inc.
 DefaultDirName={pf}\AnnotationTool
 DisableDirPage=yes
@@ -26,9 +26,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked; OnlyBelowVersion: 0,6.1
 
 [Files]
-Source: "C:\Projects\AnnotationTool\dist\AnnotationTool.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Projects\AnnotationTool\dist\AnnotationToolGUI.ui"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Projects\AnnotationTool\opencv_ffmpeg300_64.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\AnnotationTool.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "AnnotationToolGUI.ui"; DestDir: "{app}"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

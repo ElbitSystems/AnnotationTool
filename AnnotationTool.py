@@ -199,7 +199,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
     def open_file(self, file_type, filename=None):
 
         title = 'Open Video / Images' if file_type == 'video' else 'Open Annotation'
-        file_types = "Video Files (*.avi *.wmv *.mp4 *.mov);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)" \
+        file_types = "Video Files (*.avi);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)" \
                      if file_type == 'video' else 'Annotation File (*.atc)'
 
         # if working on unsaved annotation
@@ -284,7 +284,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
 
     def provide_video_location(self):
         title = 'Open Video / Images'
-        file_types = "Video Files (*.avi *.wmv *.mp4 *.mov);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)"
+        file_types = "Video Files (*.avi);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)"
 
         # open file (the 'str' - some versions of pyqt return a QString instead of a normal string)
         filename = str(QtWidgets.QFileDialog.getOpenFileName(QtWidgets.QFileDialog(),

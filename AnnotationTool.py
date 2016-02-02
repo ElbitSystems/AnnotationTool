@@ -16,7 +16,7 @@ CURRENT_ANNOTATION_FILENAME = '.current.p'
 LOG_FILENAME = 'annotation.log'
 
 # annotation tool version
-VERSION = 1.3
+VERSION = 1.4
 
 
 class FrameReadError(Exception):
@@ -399,40 +399,49 @@ class AnnotationTool(QtWidgets.QMainWindow):
         if self.annotation is None:
             return
 
-        # block signals to avoid recursive calls
-        self.frameSlider.blockSignals(True)
-        self.frameEdit.blockSignals(True)
+        try:
+            frame = self.annotation.get_frame_image()
+        except Annotation.VideoLoadError as e:
+            # message box
+            msgBox = QtWidgets.QMessageBox()
+            msgBox.setText(repr(e))
+            msgBox.exec_()
+        else:
 
-        # set current frame number in slider
-        self.frameSlider.setValue(self.annotation.current_frame)
+            # block signals to avoid recursive calls
+            self.frameSlider.blockSignals(True)
+            self.frameEdit.blockSignals(True)
 
-        # set text in edit box according to slider
-        self.frameEdit.setText(str(self.annotation.current_frame))
+            # set current frame number in slider
+            self.frameSlider.setValue(self.annotation.current_frame)
 
-        # release signals
-        self.frameSlider.blockSignals(False)
-        self.frameEdit.blockSignals(False)
+            # set text in edit box according to slider
+            self.frameEdit.setText(str(self.annotation.current_frame))
 
-        frame = self.annotation.get_frame_image()
+            # release signals
+            self.frameSlider.blockSignals(False)
+            self.frameEdit.blockSignals(False)
 
-        # deal with opencv's BGR abomination; create Qt image (width, height)
-        image = QtGui.QImage(frame.tostring(), frame.shape[1], frame.shape[0],
-                             QtGui.QImage.Format_RGB888).rgbSwapped()
 
-        # clear scene from previous drawn elements
-        self.scene.clear()
 
-        # load image to scene (set as background)
-        self.scene.set_background(image)
+            # deal with opencv's BGR abomination; create Qt image (width, height)
+            image = QtGui.QImage(frame.tostring(), frame.shape[1], frame.shape[0],
+                                 QtGui.QImage.Format_RGB888).rgbSwapped()
 
-        # load objects for current frame
-        self.scene.load(self.annotation.current_frame, self.annotation.get(self.annotation.current_frame))
+            # clear scene from previous drawn elements
+            self.scene.clear()
 
-        #   display image on graphicsView (canvas)
-        self.graphicsView.setScene(self.scene)
+            # load image to scene (set as background)
+            self.scene.set_background(image)
 
-        #   set graphics view to scene
-        self.graphicsView.show()
+            # load objects for current frame
+            self.scene.load(self.annotation.current_frame, self.annotation.get(self.annotation.current_frame))
+
+            #   display image on graphicsView (canvas)
+            self.graphicsView.setScene(self.scene)
+
+            #   set graphics view to scene
+            self.graphicsView.show()
 
     def closeEvent(self, event=None):
         """ overloaded closeEvent to allow quitting by closing window.

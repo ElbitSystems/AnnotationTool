@@ -56,7 +56,7 @@ While modifying an annotation, its old contour would still appear on frame image
 
 After releasing the mouse button, only the new contour will be displayed.
 
-![](https://cloud.githubusercontent.com/assets/5520561/12976846/88740ee0-d0cf-11e5-8f15-33f47e4b6492.png)
+![](https://cloud.githubusercontent.com/assets/5520561/12976848/889d19b6-d0cf-11e5-9921-6fb8326a10bb.png)
 
 ## Annotation Class
 

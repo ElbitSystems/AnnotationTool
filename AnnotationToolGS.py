@@ -531,6 +531,9 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
         # assign tracker to this database
         self.tracker = Tracker.Tracker(self.annotation())
 
+        # reset the selected class
+        self.class_name = None
+
     def get_color(self, rgb):
         # sanity check
         if (rgb < 0).any() or (rgb > 255).any():
@@ -545,9 +548,10 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
         # return color
         return color
 
-    def load(self, frame_number, frames):
+    def load(self, frame_number, records):
         """
         :param frame_number: load all objects from this frame and add their contours
+        :param records:      the records to load
         :return:
         """
 
@@ -555,7 +559,7 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
         self.frame_number = frame_number
 
         # get contours and data from database
-        self.records = frames  # self._annotation.get(frame_number)
+        self.records = records  # self._annotation.get(frame_number)
 
         # iterate over polygons and draw
         for r in self.records:

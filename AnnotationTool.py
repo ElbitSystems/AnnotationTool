@@ -4,6 +4,8 @@ import os
 import logging
 import pickle
 from PyQt5 import QtCore, QtGui, uic, QtWidgets
+import numpy as np
+import cv2
 
 # project imports
 import Annotation
@@ -16,7 +18,7 @@ CURRENT_ANNOTATION_FILENAME = '.current.p'
 LOG_FILENAME = 'annotation.log'
 
 # annotation tool version
-VERSION = 1.4
+VERSION = '1.4.1'
 
 
 class FrameReadError(Exception):
@@ -49,8 +51,14 @@ class AnnotationTool(QtWidgets.QMainWindow):
         # gray-out GUI elements
         self.enable_gui(False)
 
+        # disable class hiding
+        self.checkBoxHide.setEnabled(False)
+
         # no annotation yet
         self.annotation = None
+
+        # which classes are hidden from gui
+        self.hidden_classes = set()
 
         # set slider minimum
         self.frameSlider.setMinimum(1)
@@ -87,7 +95,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
         self.actionSaveAs.setEnabled(value)
 
     def populate_class_combobox(self, classes_list):
-        """ populate comboBox with config.classes
+        """ populate comboBox with classes
         :param classes_list: list of classes
         """
 
@@ -159,13 +167,30 @@ class AnnotationTool(QtWidgets.QMainWindow):
         find_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence('Ctrl+F'), self)
         find_shortcut.activated.connect(self.find_annotations)
 
+        # hide class
+        self.checkBoxHide.stateChanged.connect(self.hide_checkbox_value)
+
+    def hide_checkbox_value(self, val):
+
+        # get the selected class from class list combo box
+        selected_text = str(self.classSelectionComboBox.currentText())
+
+        # change the hidden classes set
+        if val == QtCore.Qt.Unchecked:
+            self.hidden_classes.discard(selected_text)
+        if val == QtCore.Qt.Checked:
+            self.hidden_classes.add(selected_text)
+
+        # update display
+        self.update()
+
     def class_selection_changed(self):
         """ slot for class selection combobox """
 
         # get text from ui
         selected_text = str(self.classSelectionComboBox.currentText())
 
-        # check for new class add
+        # check for new class add - handle creating the new class
         if '(New)' == selected_text:
             # open window for new class name input ('str' to avoid QStrings)
             name, ok = QtWidgets.QInputDialog.getText(QtWidgets.QInputDialog(), 'New Class', 'Enter class name:')
@@ -188,18 +213,25 @@ class AnnotationTool(QtWidgets.QMainWindow):
                 # return value of combo to previous selection
                 self.classSelectionComboBox.setCurrentIndex(self.classSelectionComboBox.count() - 1)
 
-        else:
+        # Now handle the change in value of selected class
+        new_class = selected_text if not selected_text == '(New)' else name
 
-            # inform scene TODO delete.
-            self.scene.class_name = selected_text
+        # inform scene TODO delete.
+        self.scene.class_name = new_class
 
-            # see if object classifications have to change
-            self.scene.change_class(selected_text)
+        # see if object classifications have to change
+        self.scene.change_class(new_class)
+
+        # enable class hiding
+        self.checkBoxHide.setEnabled(True)
+
+        # set 'v' in checkbox if hidden, else uncheck it
+        self.checkBoxHide.setChecked(True if new_class in self.hidden_classes else False)
 
     def open_file(self, file_type, filename=None):
 
         title = 'Open Video / Images' if file_type == 'video' else 'Open Annotation'
-        file_types = "Video Files (*.avi);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)" \
+        file_types = "Video Files (*.avi *.mp4);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)" \
                      if file_type == 'video' else 'Annotation File (*.atc)'
 
         # if working on unsaved annotation
@@ -235,7 +267,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
             self.scene.set_annotation(self.annotation)
 
             # update slider maximum
-            self.frameSlider.setMaximum(self.annotation.num_frames - 1)
+            self.frameSlider.setMaximum(self.annotation.num_frames)
 
             # enable GUI
             self.enable_gui(True)
@@ -284,7 +316,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
 
     def provide_video_location(self):
         title = 'Open Video / Images'
-        file_types = "Video Files (*.avi);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)"
+        file_types = "Video Files (*.avi *.mp4);; Images Files (*.jpg *.bmp *.tif *.tiff *.png)"
 
         # open file (the 'str' - some versions of pyqt return a QString instead of a normal string)
         filename = str(QtWidgets.QFileDialog.getOpenFileName(QtWidgets.QFileDialog(),
@@ -422,8 +454,6 @@ class AnnotationTool(QtWidgets.QMainWindow):
             self.frameSlider.blockSignals(False)
             self.frameEdit.blockSignals(False)
 
-
-
             # deal with opencv's BGR abomination; create Qt image (width, height)
             image = QtGui.QImage(frame.tostring(), frame.shape[1], frame.shape[0],
                                  QtGui.QImage.Format_RGB888).rgbSwapped()
@@ -434,8 +464,14 @@ class AnnotationTool(QtWidgets.QMainWindow):
             # load image to scene (set as background)
             self.scene.set_background(image)
 
+            # all annotations in frame
+            frame_annotations = self.annotation.get(self.annotation.current_frame)
+
+            # 'discard' the annotation of hidden classes
+            filtered_annotations = [a for a in frame_annotations if a[2] not in self.hidden_classes]
+
             # load objects for current frame
-            self.scene.load(self.annotation.current_frame, self.annotation.get(self.annotation.current_frame))
+            self.scene.load(self.annotation.current_frame, filtered_annotations)
 
             #   display image on graphicsView (canvas)
             self.graphicsView.setScene(self.scene)
@@ -477,7 +513,7 @@ class AnnotationTool(QtWidgets.QMainWindow):
 
     def export(self):
         # TODO: frames selection...
-        frames = list(range(1, self.annotation.num_frames))
+        frames = list(range(1, self.annotation.num_frames + 1))
 
         filename = str(QtWidgets.QFileDialog.getSaveFileName(QtWidgets.QFileDialog(), "Save as...",
                                                              QtCore.QDir.currentPath(),
@@ -485,10 +521,88 @@ class AnnotationTool(QtWidgets.QMainWindow):
         if not filename:
             return
 
-        self.annotation.export((self.scene.width(), self.scene.height()), os.path.dirname(filename),
-                               os.path.splitext(os.path.basename(str(filename)))[0], frames,
-                               self.scene.colormap, self.scene.inverse_colormap,
-                               os.path.splitext(os.path.basename(str(filename)))[1])
+        # export stuff
+        dirname = os.path.dirname(filename)
+        split_filename = os.path.splitext(os.path.basename(str(filename)))
+        filename = split_filename[0]
+
+        colormap = self.scene.colormap
+        inverse_colormap = self.scene.inverse_colormap
+        suffix = split_filename[1]
+
+        # draw all requested frames
+        for f in progress(frames, 'Export Progress', 'Abort'):
+            # current frame number
+            # f = frames[i]
+
+            #   initialize image
+            qt_image = QtGui.QImage(self.scene.width(), self.scene.height(), QtGui.QImage.Format_RGB888)
+            qt_image.fill(0)
+
+            #   fetch all objects for current frame
+            records = self.annotation.get(f)
+
+            #   list holding colors in current frame
+            frame_colors = []
+
+            #   draw all objects
+            for r in records:
+                #   initialize image
+                #   Note: 24-bit RGB is extremely wasteful. we actually have 1-channel binary
+                #   This is due to the difficulty in converting qt to opencv images
+
+                #   painter
+                painter = QtGui.QPainter(qt_image)
+
+                #   current contour "points"
+                points = [int(s) for s in r[3].split()]
+
+                #   extract (x, y) couples from list of points
+                points = list(zip(points[::2], points[1::2]))
+
+                #   create list of Qt.QPointF from (x, y) lists
+                points = [QtCore.QPoint(*p) for p in points]
+
+                #   create contour
+                contour = QtGui.QPolygon(points)
+
+                #   paint
+                rgb = colormap[:, r[1]]
+
+                #   record color
+                frame_colors.append(rgb)
+
+                # set pen
+                color = QtGui.QColor(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+                painter.setPen(QtGui.QPen(color, 2, QtCore.Qt.SolidLine))
+                painter.setBrush(color)
+                painter.drawPolygon(contour)
+
+                del painter
+
+            #   if no objects in frame, don't save it
+            if len(frame_colors) == 0:
+                continue
+
+            if '.tiff' == suffix:
+                #   convert qimage to opencv
+                cv_image = qimage2cv(qt_image)
+
+                #   initialize 16-bit result
+                result = np.zeros((self.scene.height(), self.scene.width()), dtype=np.uint16)
+
+                #   iterate over all colors
+                for c in frame_colors:
+                    #   find all places with current color
+                    mask = cv2.inRange(cv_image, c, c) / 255
+
+                    #   set pixels in ID image
+                    result += inverse_colormap[tuple(c)] * mask
+
+                    #   write to disk
+                    cv2.imwrite(dirname + '/' + filename + str(f) + '.tiff', result)
+            else:
+                qt_image.save(dirname + '/' + filename + str(f) + '.png')
 
     def combine_objects(self):
 
@@ -817,6 +931,31 @@ class CombineObjectsDialog(QtWidgets.QDialog):
 
         # now close window
         self.close()
+
+
+def qimage2cv(qt_image):
+    """  Converts a QImage into an opencv MAT format  """
+
+    width = qt_image.width()
+    height = qt_image.height()
+
+    ptr = qt_image.bits()
+    ptr.setsize(qt_image.byteCount())
+    arr = np.array(ptr).reshape(height, width, 3)
+    return arr
+
+
+def progress(data, *args):
+    it = iter(data)
+    widget = QtWidgets.QProgressDialog(*args + (0, it.__length_hint__()))
+    c = 0
+    for v in it:
+        QtCore.QCoreApplication.instance().processEvents()
+        if widget.wasCanceled():
+            raise StopIteration
+        c += 1
+        widget.setValue(c)
+        yield (v)
 
 
 if __name__ == "__main__":

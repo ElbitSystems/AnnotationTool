@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1038</width>
-    <height>770</height>
+    <width>966</width>
+    <height>746</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -89,6 +89,16 @@
           </property>
          </widget>
         </item>
+        <item>
+         <widget class="QCheckBox" name="checkBoxHide">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>Hide</string>
+          </property>
+         </widget>
+        </item>
        </layout>
       </item>
      </layout>
@@ -100,7 +110,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1038</width>
+     <width>966</width>
      <height>21</height>
     </rect>
    </property>

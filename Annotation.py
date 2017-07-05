@@ -73,6 +73,8 @@ class Annotation(object):
             # create new annotation (using workspace temporary file)
             self.create(filename, temp_filename)
 
+        self.max_id = self._fetch_max_id()
+
     @staticmethod
     def update_video_filename_in_annotation(annotation, video):
         # create database
@@ -86,7 +88,7 @@ class Annotation(object):
         connection.close()
         return annotation
 
-    def get_max_id(self):
+    def _fetch_max_id(self):
 
         self.cursor.execute('SELECT max(object) from frames')
         try:
@@ -98,6 +100,10 @@ class Annotation(object):
             # if fails, there are no values in db
             max_id = 0
         return max_id
+
+    def get_new_id(self):
+        self.max_id += 1
+        return self.max_id
 
     def is_file_saved(self):
         return self._filename != os.path.abspath(Annotation.TEMP_WORKING_FILENAME)
@@ -280,11 +286,19 @@ class Annotation(object):
 
             # find how many consecutive 0's in filename
             *_, b = basename.split('/')
-            zeros = re.search('0+', b).group(0)
-            pat = '%' + str(len(zeros)) + 'd'
 
-            # python magic to replace last appearance of 'zeros' with 'pat'
-            video_filename = video_filename[::-1].replace(zeros[::-1], pat[::-1], 1)[::-1]
+            try:
+
+                # look for 0,,,0 or 0,,,01 and replace with regex
+                zeros = max(re.findall('0+1?', b))
+                pat = '%' + str(len(zeros)) + 'd'
+
+                # python magic to replace last appearance of 'zeros' with 'pat'
+                video_filename = video_filename[::-1].replace(zeros[::-1], pat[::-1], 1)[::-1]
+
+            # If a number does no exists, keep filename as is
+            except ValueError:
+                pass
 
         # attempt to open
         self.cap = cv2.VideoCapture(video_filename)

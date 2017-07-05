@@ -709,7 +709,8 @@ class AnnotationScene(QtWidgets.QGraphicsScene):
         self.lines = []
 
         # get new ID
-        self.current_id = self.annotation().get_max_id() + 1
+        a = self.annotation()
+        self.current_id = a.get_new_id()
 
         #   mark as a changed item (avoid tracking it again on frame change)
         self.changed_items.append(self.current_id)

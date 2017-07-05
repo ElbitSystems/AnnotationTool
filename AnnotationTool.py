@@ -18,7 +18,7 @@ CURRENT_ANNOTATION_FILENAME = '.current.p'
 LOG_FILENAME = 'annotation.log'
 
 # annotation tool version
-VERSION = '1.4.1'
+VERSION = '1.4.4'
 
 
 class FrameReadError(Exception):
